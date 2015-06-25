@@ -1,0 +1,11 @@
+[root]
+name = "search"
+version = "0.1.0"
+dependencies = [
+ "n3 0.1.0",
+]
+
+[[package]]
+name = "n3"
+version = "0.1.0"
+
