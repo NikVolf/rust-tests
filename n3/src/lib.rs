@@ -1,12 +1,3 @@
-#[test]
-fn it_works() {
-}
-
-struct PredicateObject {
-	predicate: String,
-	object: String
-}
-
 struct Literal {
 	parent: Option<Box<Literal>>,
 	name: String
@@ -22,11 +13,24 @@ impl Literal {
 	}
 
     fn to_string (&self) -> String {
-		if self.parent == None {
-			"".to_string()
-		}
-		else {
-			self.parent.to_string() + ".".to_string() + "." + self.name
+		match self.parent {
+			Some(ref p) => p.to_string() + "." + &*self.name,
+			None => "root".to_string()
 		}
 	}
+
 }
+
+#[test]
+fn can_create_root_literal() {
+	let root = Literal::root();
+}
+
+#[test]
+fn can_create_nested() {
+	let root = Literal::root();
+	let verb = Literal::new(root, "verb");
+
+	println!("{}", verb.to_string());
+}
+
