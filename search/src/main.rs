@@ -2,6 +2,29 @@ use std::io::stdin;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
+// given: dad went fishing
+// :o1 :node :n1,
+//           :n2,
+//           :n3.
+// 
+// :n1 :word "dad";
+//     :dist 0.
+// :n2 :word "went";
+//     :dist 1.
+// :n3 :word "fishing";
+//     :dist 2.
+//
+// :o2 :node :n4,
+//           :n5,
+//           :n6.
+//
+// :n4 :word "dad";
+//     :dist -1.
+// :n5 :word "went";
+//     :dist 0.
+// :n6 :word "fishing";
+//     :dist 1.
+
 fn main() {
     let mut words = Word::parse("The smallest unit of language which has a particular meaning and can be expressed by itself; the smallest discrete, meaningful unit of language".to_string());
 
