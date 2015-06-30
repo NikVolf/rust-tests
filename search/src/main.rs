@@ -24,6 +24,7 @@ use std::collections::VecDeque;
 //     :dist 0.
 // :n6 :word "fishing";
 //     :dist 1.
+// (c) Denis Dyatlov
 
 fn main() {
     let mut words = Word::parse("The smallest unit of language which has a particular meaning and can be expressed by itself; the smallest discrete, meaningful unit of language".to_string());
