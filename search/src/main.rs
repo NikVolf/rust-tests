@@ -1,7 +1,8 @@
-use std::io::stdin;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::fmt;
+use std::io::prelude::*;
+use std::fs::File;
 
 // given: dad went fishing
 // :o1 :node :n1,
@@ -34,50 +35,67 @@ enum Predicate {
     Node
 }
 
+impl Predicate {
+    fn order(&self) -> i64 {
+        return match *self {
+                Predicate::Word => 10,
+                Predicate::Distance => 20,
+                Predicate::Node => 30
+            }
+    }
+}
+
 #[derive(Copy, Clone)]
-enum LiteralValue {
+enum LiteralValue<'a> {
     Integer(i64),
     Float(f64),
-    Text(&'static str)
+    Text(&'a str)
 }
 
 #[derive(Copy, Clone)]
-enum ObjectValue {
+enum ObjectValue<'a> {
     Id(i64),
-    Literal(LiteralValue)
+    Literal(LiteralValue<'a>)
 }
 
 #[derive(Copy, Clone)]
-struct Fact {
+struct Fact<'a> {
     subject: i64,
     predicate: Predicate,
-    object: ObjectValue
+    object: ObjectValue<'a>
 }
 
-static island_radius: usize = 2;
-static island_size: usize = 5;
+static island_radius: usize = 9;
+static island_size: usize = 19;
 
 static mut counter: i64 = 0;
 
-impl Fact {
-    fn new_object_fact(subject_id: i64, predicate: Predicate, object_id: i64) -> Fact {
+impl<'a> Fact<'a> {
+    fn new_object_fact(subject_id: i64, predicate: Predicate, object_id: i64) -> Fact<'a> {
         return Fact { subject: subject_id, predicate: predicate, object: ObjectValue::Id(object_id)};
     }
 
-    fn new_literal_fact(subject_id: i64, predicate: Predicate, literal: LiteralValue) -> Fact {
+    fn new_literal_fact(subject_id: i64, predicate: Predicate, literal: LiteralValue<'a>) -> Fact<'a> {
         return Fact { subject: subject_id, predicate: predicate, object: ObjectValue::Literal(literal) };
     }
 
-    fn new_integer_fact(subject_id: i64, predicate: Predicate, value: i64) -> Fact {
+    fn new_integer_fact(subject_id: i64, predicate: Predicate, value: i64) -> Fact<'a> {
         return Fact { subject: subject_id, predicate: predicate, object: ObjectValue::Literal(LiteralValue::Integer(value))};
     }
 
-    fn new_float_fact(subject_id: i64, predicate: Predicate, value: f64) -> Fact {
+    fn new_float_fact(subject_id: i64, predicate: Predicate, value: f64) -> Fact<'a> {
         return Fact { subject: subject_id, predicate: predicate, object: ObjectValue::Literal(LiteralValue::Float(value))};
     }
 
-    fn new_text_fact(subject_id: i64, predicate: Predicate, value: &'static str) -> Fact {
+    fn new_text_fact(subject_id: i64, predicate: Predicate, value: &'a str) -> Fact<'a> {
         return Fact { subject: subject_id, predicate: predicate, object: ObjectValue::Literal(LiteralValue::Text(value))};
+    }
+
+    fn get_object_id(&self) -> i64 {
+        match self.object {
+                ObjectValue::Literal(ref literal) => { panic!("literal is of text value"); }
+                ObjectValue::Id(id) => { return id; }
+            }
     }
 
     fn get_integer_literal(&self) -> i64 {
@@ -127,22 +145,59 @@ impl Fact {
     }
 }
 
-fn literal_to_string(literal: &LiteralValue) -> String {
-    return match *literal {
-        LiteralValue::Text(ref s) => (*s).to_string(),
-        LiteralValue::Integer(ref i) => (*i).to_string(),
-        LiteralValue::Float(ref f) => (*f).to_string()
+fn resolve_literal<'a>(facts: &Vec<Fact<'a>>, subject: i64, predicate: Predicate) -> LiteralValue<'a> {
+    let candidates:Vec<Fact> = facts
+        .iter()
+        .filter(|x| (*x).subject == subject && (*x).predicate.order() == predicate.order())
+        .map(|x| *x)
+        .collect();
+
+    if candidates.len() != 1 {
+        panic!("no subject-predicate pair")
+    }
+
+    let fact = candidates[0];
+
+    match fact.object {
+        ObjectValue::Literal(literal) => { return literal; }
+        _ => { panic!("fact is not defined by literal"); }
+    }
+}
+
+fn resolve_object(facts: &Vec<Fact>, subject: i64, predicate: Predicate) -> i64 {
+    let candidates:Vec<Fact> = facts
+    .iter()
+    .filter(|x| (*x).subject == subject && (*x).predicate.order() == predicate.order())
+    .map(|x| *x)
+    .collect();
+
+    if candidates.len() != 1 {
+        panic!("no subject-predicate pair")
+    }
+
+    let fact = candidates[0];
+
+    match fact.object {
+            ObjectValue::Id(x) => x,
+            _ => { panic!("fact is not defined as object"); }
+        }
+}
+fn literal_to_string(literal: LiteralValue) -> String {
+    return match literal {
+        LiteralValue::Text(s) => s.to_string(),
+        LiteralValue::Integer(i) => i.to_string(),
+        LiteralValue::Float(f) => f.to_string()
     };
 }
 
 fn object_to_string(object_value: &ObjectValue) -> String {
     return match *object_value {
-        ObjectValue::Literal(ref literal) => literal_to_string(literal),
-        ObjectValue::Id(ref id) => (*id).to_string()
+        ObjectValue::Literal(literal) => literal_to_string(literal),
+        ObjectValue::Id(id) => id.to_string()
     }
 }
 
-impl fmt::Display for Fact {
+impl<'a> fmt::Display for Fact<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let predicate = match self.predicate {
                 Predicate::Distance => "dist",
@@ -162,20 +217,39 @@ impl fmt::Display for Fact {
     }
 }
 
-fn split_sentence(text: &'static str) -> (Vec<&'static str>, Vec<&'static str>, Vec<&'static str>, Vec<&'static str>) {
-    let all_words:Vec<&'static str> = text.split(" ").collect();
+struct SentenceSplit<'a> {
+    all_words: Vec<&'a str>,
+    initial_words: Vec<&'a str>,
+    middle_words: Vec<&'a str>,
+    tail_words: Vec<&'a str>
+}
 
+fn split_sentence<'a>(text: &'a str) -> SentenceSplit<'a> {
+    let all_words:Vec<&str> = text.split(" ").collect();
     let (initial_words, non_initial_words) = all_words.split_at(island_radius);
     let (middle_words, tail_words) = non_initial_words.split_at(non_initial_words.len() - island_radius);
 
-    return (all_words.clone(), initial_words.to_vec(), middle_words.to_vec(), tail_words.to_vec());
+    return SentenceSplit {
+        all_words: all_words.to_vec(),
+        initial_words: initial_words.to_vec(),
+        middle_words: middle_words.to_vec(),
+        tail_words: tail_words.to_vec(),
+    }
 }
 
-fn parse(text: &'static str) -> Vec<Fact> {
-    let (all_words, initial_words, middle_words, tail_words) = split_sentence(text);
+fn try_split<'a>(text: &'a str) {
+    let sentence_split:SentenceSplit<'a> = split_sentence(text);
+    let all_words = sentence_split.all_words;
+
+    println!("{}", all_words.get(0).unwrap());
+    println!("{}", all_words.get(0).unwrap());
+}
+
+fn parse<'a>(text: &'a str) -> Vec<Fact> {
+    let sentence_split:SentenceSplit<'a> = split_sentence(text);
     let mut result:Vec<Fact> = Vec::new();
 
-    for (initial_index, initial_word) in initial_words.iter().enumerate() {
+    for (initial_index, initial_word) in sentence_split.initial_words.iter().enumerate() {
         let start = 0;
         let finish = initial_index + island_radius;
 
@@ -184,21 +258,24 @@ fn parse(text: &'static str) -> Vec<Fact> {
         for word_index in start..finish {
             let distance = initial_index as i64 - word_index as i64;
             let island_word = Fact::new_id();
-            result.push(Fact::new_object_fact(island, Predicate::Node, island_word));
-            result.push(Fact::new_text_fact(island_word, Predicate::Word, all_words.get(word_index).unwrap()));
+            result.push(Fact::new_object_fact(island_word, Predicate::Node, island));
+            result.push(Fact::new_text_fact(
+                island_word,
+                Predicate::Word,
+                sentence_split.all_words.get(word_index).unwrap()));
             result.push(Fact::new_integer_fact(island_word, Predicate::Distance, distance));
         }
     }
 
     let mut index = 0;
 
-    for word_window in all_words.windows(island_size) {
+    for word_window in sentence_split.all_words.windows(island_size) {
         let island = Fact::new_id();
         for (word_index, word) in word_window.iter().enumerate() {
             let distance = word_index as i64 - island_radius as i64;
             let island_word = Fact::new_id();
-            let word_value = all_words.get(index + word_index).unwrap();
-            result.push(Fact::new_object_fact(island, Predicate::Node, island_word));
+            let word_value = sentence_split.all_words.get(index + word_index).unwrap();
+            result.push(Fact::new_object_fact(island_word, Predicate::Node, island));
             result.push(Fact::new_text_fact(island_word, Predicate::Word, word_value));
             result.push(Fact::new_integer_fact(island_word, Predicate::Distance, distance as i64));
         }
@@ -210,12 +287,37 @@ fn parse(text: &'static str) -> Vec<Fact> {
 
 
 fn main() {
+    print!("loading facts...");
+    let mut example_file = match File::open("example.txt") {
+        Ok(f) => f,
+        Err(err) => panic!("file error: {}", err)
+    };
+    let mut example_string = String::new();
+    example_file.read_to_string(&mut example_string);
+    let facts = parse(&example_string);
+
+    println!(" done({})", facts.len());
+
+    let mut validate_file = match File::open("validate.txt") {
+        Ok(f) => f,
+        Err(err) => panic!("file error: {}", err)
+    };
+    let mut validate_string = String::new();
+    validate_file.read_to_string(&mut validate_string);
+    let next_word = find_next_word(&facts, &validate_string);
+
+    println!("next word is: {}", next_word);
 }
 
 const example: &'static str =
-"In linguistics a word is the smallest element that may be uttered in isolation with semantic or\
+"\
+In linguistics a word is the smallest element that may be uttered in isolation with semantic or\
 pragmatic content (with literal or practical meaning). This contrasts with a morpheme, which is\
-the smallest unit of meaning but will not necessarily stand on its own.";
+the smallest unit of meaning but will not necessarily stand on its own.\
+";
+
+//const SHORT_EXAMPLE: &'static str = "The shortest text that parses";
+
 
 #[test]
 fn it_parses() {
@@ -240,7 +342,7 @@ fn it_finds_facts_for_contrasts() {
     assert_eq!(island_size, word_facts.len());
 }
 
-fn collect_word_facts (facts: &Vec<Fact>, word: &'static str) -> Vec<Fact> {
+fn collect_word_facts<'a> (facts: &Vec<Fact<'a>>, word: &'a str) -> Vec<Fact<'a>> {
     return facts.iter().filter(
         |f| match f.object {
             ObjectValue::Literal(ref literal) =>
@@ -254,8 +356,21 @@ fn collect_word_facts (facts: &Vec<Fact>, word: &'static str) -> Vec<Fact> {
         .collect();
 }
 
-fn resolve_word_distance(facts: &Vec<Fact>, subject: i64) -> Fact {
-    let facts:Vec<Fact> = facts.iter().filter(
+fn collect_island_facts<'a>(facts: &Vec<Fact<'a>>, island: i64) -> Vec<Fact<'a>> {
+    return facts.iter()
+        .filter(
+            |f| match f.predicate {
+                Predicate::Node => f.get_object_id() == island,
+                _ => false
+            })
+        .map(|x| *x)
+        .collect();
+}
+
+
+
+fn resolve_word_distance<'a>(facts: &Vec<Fact<'a>>, subject: i64) -> Fact<'a> {
+    let facts:Vec<Fact<'a>> = facts.iter().filter(
         |f| match f.predicate {
             Predicate::Distance => f.subject == subject,
             _ => false
@@ -278,16 +393,33 @@ fn it_finds_positive_facts_for_contrasts() {
             .collect();
 
     for fact in positive_facts.iter() {
-        println!("[:{}, {}] :{} 'contrasts'",
-            fact.subject,
-            resolve_word_distance(&facts, fact.subject),
-            match fact.predicate {
-                Predicate::Distance => "dist",
-                Predicate::Node => "node",
-                Predicate::Word => "word"
-            }
-        );
+        println!("{}", fact);
     }
+}
+
+fn find_next_word<'a>(facts: &Vec<Fact<'a>>, word: &'a str) -> String {
+    let word_facts: Vec<Fact> = collect_word_facts(&facts, word);
+
+    let previous_word_facts:Vec<Fact> = word_facts
+        .iter()
+        .filter(|x| (resolve_word_distance(&facts, (*x).subject).get_integer_literal() == 1))
+        .map(|x| *x)
+        .collect();
+
+    let previous_word_fact:Fact = *(previous_word_facts.first().unwrap());
+
+    let island = resolve_object(&facts, previous_word_fact.subject, Predicate::Node);
+
+    let island_facts = collect_island_facts(&facts, island);
+
+    let island_dist0_facts:Vec<Fact> = island_facts
+        .iter()
+        .filter(|x| (resolve_word_distance(&facts, (*x).subject).get_integer_literal() == 0))
+        .map(|x| *x)
+        .collect();
+    let island_dist0_fact = *(island_dist0_facts.first().unwrap());
+
+    return literal_to_string(resolve_literal(&facts, island_dist0_fact.subject, Predicate::Word));
 }
 
 #[test]
@@ -297,32 +429,36 @@ fn it_finds_next_word_for_contrasts() {
 
     let previous_word_facts:Vec<Fact> = word_facts
         .iter()
-        .filter(|x| (resolve_word_distance(&facts, (*x).subject).get_integer_literal() == -1))
+        .filter(|x| (resolve_word_distance(&facts, (*x).subject).get_integer_literal() == 1))
         .map(|x| *x)
         .collect();
 
     let previous_word_fact:Fact = *(previous_word_facts.first().unwrap());
+    println!("previous word fact: {}", previous_word_fact);
 
-    println!("previous word: {}", previous_word_fact);
+    let island = resolve_object(&facts, previous_word_fact.subject, Predicate::Node);
+    println!("island: {}", island);
 
-//
-//            .collect()
-//            .first();
+    let island_facts = collect_island_facts(&facts, island);
+    println!("island facts: {}", island_facts.len());
 
-//    let fact0 =
-//        facts.iter()
-//            .filter(|x:Fact| resolve_word_distance(&facts, fact.subject).get_integer_literal() == 0)
-//            .map(|x| * x);
-//
+    let island_dist0_facts:Vec<Fact> = island_facts
+        .iter()
+        .filter(|x| (resolve_word_distance(&facts, (*x).subject).get_integer_literal() == 0))
+        .map(|x| *x)
+        .collect();
+    let island_dist0_fact = *(island_dist0_facts.first().unwrap());
 
+    let previous_word = literal_to_string(resolve_literal(&facts, island_dist0_fact.subject, Predicate::Word));
+    println!("previous word: {}", previous_word);
 }
 
 #[test]
 fn it_can_split_to_sentence_epochs() {
-    let (all, p1, p2, p3) = split_sentence("A great day to actually die");
+    let split = split_sentence("A great day to actually die");
 
-    assert_eq!(["A", "great"].to_vec(), p1);
-    assert_eq!(["actually", "die"].to_vec(), p3);
+    assert_eq!(["A", "great"].to_vec(), split.initial_words);
+    assert_eq!(["actually", "die"].to_vec(), split.tail_words);
 }
 
 #[test]
