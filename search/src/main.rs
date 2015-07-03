@@ -65,8 +65,8 @@ struct Fact<'a> {
     object: ObjectValue<'a>
 }
 
-static island_radius: usize = 9;
-static island_size: usize = 19;
+static island_radius: usize = 2;
+static island_size: usize = 5;
 
 static mut counter: i64 = 0;
 
@@ -145,6 +145,50 @@ impl<'a> Fact<'a> {
     }
 }
 
+struct FactSpace<'a>{
+    facts: Vec<Fact<'a>>
+}
+
+impl<'a> FactSpace<'a> {
+
+    fn from_facts (facts: &'a Vec<Fact>) -> FactSpace<'a> {
+        return FactSpace {
+            facts: facts.clone()
+        }
+    }
+
+    fn match_objects<F>(&self, f: F) -> FactSpace<'a>
+        where F: Fn(i64, Predicate) -> bool
+    {
+        let matches: Vec<Fact> = self.facts
+            .iter()
+            .filter(|x| f(x.subject, (x.predicate)))
+            .map(|x| x.clone())
+            .collect();
+
+        return FactSpace {
+            facts: matches.clone()
+        }
+    }
+//
+//    fn as_literals(&self) -> Vec<LiteralValue<'a>> {
+//
+//    }
+
+}
+
+#[test]
+fn can_create_derived_fact_space() {
+    let facts = parse(example);
+    let space = FactSpace::from_facts(&facts);
+
+    let small_space = space.match_objects(|s, p| s == facts[0].subject && p.order() == facts[0].predicate.order());
+
+    for fact0 in small_space.facts.iter() {
+        println!("{}", fact0);
+    }
+}
+
 fn resolve_literal<'a>(facts: &Vec<Fact<'a>>, subject: i64, predicate: Predicate) -> LiteralValue<'a> {
     let candidates:Vec<Fact> = facts
         .iter()
@@ -196,6 +240,7 @@ fn object_to_string(object_value: &ObjectValue) -> String {
         ObjectValue::Id(id) => id.to_string()
     }
 }
+
 
 impl<'a> fmt::Display for Fact<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
