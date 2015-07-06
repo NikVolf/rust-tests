@@ -157,12 +157,18 @@ impl<'a> FactSpace<'a> {
         }
     }
 
-    fn match_objects<F>(&self, f: F) -> FactSpace<'a>
-        where F: Fn(i64, Predicate) -> bool
+    fn from_heap (facts: Box<Vec<Fact<'a>>>) -> FactSpace<'a> {
+        return FactSpace {
+            facts: (*facts).clone()
+        }
+    }
+
+    fn match_any<F>(&self, f: F) -> FactSpace<'a>
+        where F: Fn(i64, Predicate, ObjectValue) -> bool
     {
         let matches: Vec<Fact> = self.facts
             .iter()
-            .filter(|x| f(x.subject, (x.predicate)))
+            .filter(|x| f(x.subject, x.predicate, x.object))
             .map(|x| x.clone())
             .collect();
 
@@ -170,11 +176,133 @@ impl<'a> FactSpace<'a> {
             facts: matches.clone()
         }
     }
-//
-//    fn as_literals(&self) -> Vec<LiteralValue<'a>> {
-//
-//    }
 
+    fn match_objects<F>(&self, f: F) -> FactSpace<'a>
+        where F: Fn(i64, Predicate) -> bool
+    {
+        return self.match_any(|s, p, o| f(s, p));
+    }
+
+    fn match_predicates<F>(&self, f: F) -> FactSpace<'a>
+        where F: Fn(Predicate) -> bool
+    {
+        return self.match_any(|s, p, o| f(p));
+    }
+
+    fn match_subjects<F>(&self, f: F) -> FactSpace<'a>
+        where F: Fn(Predicate, ObjectValue) -> bool
+    {
+        return self.match_any(|s, p, o| f(p, o));
+    }
+
+    fn match_subject_with_literal<F>(&self, f: F) -> FactSpace<'a>
+        where F: Fn(Predicate, LiteralValue) -> bool
+    {
+        return self.match_any(
+            |s, p, o| match o {
+                    ObjectValue::Id(id) => false,
+                    ObjectValue::Literal(literal) => f(p, literal)
+                });
+    }
+
+    fn match_subject_with_integer<F>(&self, f: F) -> FactSpace<'a>
+        where F: Fn(Predicate, i64) -> bool
+    {
+        return self.match_subject_with_literal(
+            |p, l| match l {
+                    LiteralValue::Text(s) => false,
+                    LiteralValue::Integer(i) => f(p, i),
+                    LiteralValue::Float(f) => false
+                }
+        )
+    }
+
+    fn match_subject_with_text<F>(&self, f: F) -> FactSpace<'a>
+        where F: Fn(Predicate, &str) -> bool
+    {
+        return self.match_subject_with_literal(
+            |p, l| match l {
+                    LiteralValue::Text(s) => f(p, s),
+                    LiteralValue::Integer(i) => false,
+                    LiteralValue::Float(f) => false
+                }
+        )
+    }
+
+    fn as_literals(&self) -> Vec<LiteralValue<'a>> {
+        let converts: Vec<LiteralValue> = self.facts
+            .iter()
+            .map(|x| match x.object {
+                ObjectValue::Id(id) => { panic!("not a literal in space casted to literals") }
+                ObjectValue::Literal(literal) => { return literal; }
+            })
+            .collect();
+
+        return converts.clone();
+    }
+
+    fn single(&self) -> Fact<'a> {
+        let len = self.facts.len();
+        match len {
+            1 => { return self.facts[0]; }
+            _ => { panic!("fact in space is not single"); }
+        }
+    }
+
+    fn get_subjects(&self) -> Vec<i64> {
+        let mut sort:Vec<i64> = self.facts.iter().map(|x| x.subject).collect();
+        sort.sort_by(|x,y| x.cmp(y));
+        sort.dedup();
+        return sort;
+    }
+
+    fn contains_subject(&self, subject: i64) -> bool {
+        let subjects: Vec<i64> = self.facts.iter().map(|x| x.subject).collect();
+        return subjects.contains(&subject);
+    }
+
+    fn open_subject(&self, subject: i64) -> FactSpace {
+        return self.match_any(|s, p, o| s == subject);
+    }
+
+    fn open_subjects(&self, subjects: Vec<i64>) -> FactSpace<'a> {
+        return self.match_any(|s, p, o| subjects.contains(&s));
+    }
+}
+
+#[test]
+fn can_enumerate_subjects() {
+    let mut facts: Vec<Fact> = Vec::new();
+    facts.push(Fact::new_text_fact(1, Predicate::Word, "a"));
+    facts.push(Fact::new_text_fact(1, Predicate::Distance, "b"));
+    facts.push(Fact::new_text_fact(2, Predicate::Word, "c"));
+    facts.push(Fact::new_text_fact(3, Predicate::Distance, "d"));
+    facts.push(Fact::new_text_fact(3, Predicate::Word, "e"));
+    facts.push(Fact::new_text_fact(3, Predicate::Distance, "f"));
+
+    let space = FactSpace::from_facts(&facts);
+
+    let subjects = space.get_subjects();
+
+    assert_eq!(vec![1,2,3], subjects);
+}
+
+#[test]
+fn can_open_subjects() {
+    let mut facts: Vec<Fact> = Vec::new();
+    facts.push(Fact::new_text_fact(1, Predicate::Word, "a"));
+    facts.push(Fact::new_text_fact(1, Predicate::Distance, "b"));
+    facts.push(Fact::new_text_fact(2, Predicate::Word, "c"));
+    facts.push(Fact::new_text_fact(3, Predicate::Distance, "d"));
+    facts.push(Fact::new_text_fact(3, Predicate::Word, "e"));
+    facts.push(Fact::new_text_fact(3, Predicate::Distance, "f"));
+    facts.push(Fact::new_text_fact(3, Predicate::Word, "g"));
+
+    let space = FactSpace::from_facts(&facts);
+
+    let open_subjects = space.open_subjects(vec![1, 3]);
+
+    assert_eq!(6, open_subjects.facts.len());
 }
 
 #[test]
@@ -183,6 +311,18 @@ fn can_create_derived_fact_space() {
     let space = FactSpace::from_facts(&facts);
 
     let small_space = space.match_objects(|s, p| s == facts[0].subject && p.order() == facts[0].predicate.order());
+
+    for fact0 in small_space.facts.iter() {
+        println!("{}", fact0);
+    }
+}
+
+#[test]
+fn can_cast_space_to_literals() {
+    let facts = parse(example);
+    let space = FactSpace::from_facts(&facts);
+
+    let small_space = space.match_predicates(|p| match p { Predicate::Word => true, _ => false });
 
     for fact0 in small_space.facts.iter() {
         println!("{}", fact0);
@@ -330,6 +470,11 @@ fn parse<'a>(text: &'a str) -> Vec<Fact> {
     return result;
 }
 
+fn parse_space<'a>(text: &'a str) -> FactSpace<'a> {
+    let boxed: Box<Vec<Fact>> = Box::new(parse(text));
+    return FactSpace::from_heap(boxed);
+}
+
 
 fn main() {
     print!("loading facts...");
@@ -372,19 +517,9 @@ fn it_parses() {
 
 #[test]
 fn it_finds_facts_for_contrasts() {
-    let facts = parse(example);
-    let word = "contrasts".to_string();
-    let word_facts:Vec<&Fact> = facts.iter().filter(
-        |ref f| match f.object {
-            ObjectValue::Literal(ref literal) =>
-                match *literal {
-                    LiteralValue::Text(ref s) => *s == word,
-                    _ => false
-                },
-            _ => false
-        }).collect();
-
-    assert_eq!(island_size, word_facts.len());
+    let space = parse_space(example);
+    let word_space = space.match_subject_with_text(|p, t| t == "contrasts");
+    assert_eq!(island_size, word_space.facts.len());
 }
 
 fn collect_word_facts<'a> (facts: &Vec<Fact<'a>>, word: &'a str) -> Vec<Fact<'a>> {
@@ -428,17 +563,23 @@ fn resolve_word_distance<'a>(facts: &Vec<Fact<'a>>, subject: i64) -> Fact<'a> {
 
 #[test]
 fn it_finds_positive_facts_for_contrasts() {
-    let facts = parse(example);
-    let word_facts = collect_word_facts(&facts, "contrasts");
 
-    let positive_facts:Vec<Fact> =
-        word_facts.iter()
-            .filter(|x| resolve_word_distance(&facts, x.subject).get_float_literal() > 0.0)
-            .map(|x| *x)
-            .collect();
+    let space = parse_space(example);
 
-    for fact in positive_facts.iter() {
-        println!("{}", fact);
+    let contrasts_facts = space
+        .match_subject_with_text(|p, t| t == "contrasts");
+
+    let dist_facts = space
+        .match_objects(|s, p|
+            match p {
+                Predicate::Distance => contrasts_facts.contains_subject(s),
+                _ => false
+            });
+
+    let positive_dist_facts = dist_facts.match_subject_with_integer(|p, i| i > 0);
+
+    for fact in positive_dist_facts.facts.iter() {
+        println!("positive fact: {}", fact);
     }
 }
 
